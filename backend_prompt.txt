@@ -1,0 +1,66 @@
+Prompt for Developing a Spring Boot 3.x Backend with Conversation History
+
+Create a complete Spring Boot 3.x backend project using Gradle that meets the following requirements:
+
+Project Setup:
+
+    Use Gradle as the build tool.
+    Use Java (minimum version 17) and Spring Boot 3.x.
+    Include dependencies for Spring Web, Spring Data JPA, H2 Database (for in‑memory persistence), and OkHttp (for HTTP calls).
+    Optionally include Lombok to reduce boilerplate code.
+
+Application Configuration:
+
+    Configure the application in application.properties to include:
+        The OpenRouter API URL (https://openrouter.ai/api/v1/chat/completions).
+        The OpenRouter API key loaded from an environment variable (e.g., OPENROUTER_API_KEY).
+        H2 database settings with a URL like jdbc:h2:mem:chatdb;DB_CLOSE_DELAY=-1.
+        Enable the H2 console for testing.
+        Set the JPA Hibernate DDL auto property to update.
+
+Chat Conversation Flow and Persistence:
+
+    Create an endpoint /ask that accepts POST requests with a JSON payload.
+    The request JSON should map to a ChatRequest DTO with the following fields:
+        userId: A string representing the user.
+        prompt: The user’s query.
+        history: A list of strings (initially may be empty) representing the conversation history.
+        model: An optional field; if not provided, default to "google/gemma-3-12b-it:free".
+    Implement an entity called ChatMessage (using Spring Data JPA) with fields for:
+        id (auto-generated),
+        userId,
+        sender (which can be "user" or "ai"),
+        message (store the text),
+        timestamp (store when the message was created).
+    Create a repository (ChatMessageRepository) to retrieve conversation history for a given user (ordered by timestamp).
+
+Backend Business Logic:
+
+    In the service layer (e.g., OpenRouterService):
+        Retrieve the conversation history from the database for the given userId.
+        Convert each saved message into a string prefixed by its sender (e.g., "user: ..." or "ai: ...").
+        Append the new user query (prefixed by "user:") to the conversation history.
+        Save the new user query as a ChatMessage in the database.
+        Build a complete request (with prompt, history, and model) to call the OpenRouter API.
+    Use OkHttp to create a POST request to the OpenRouter API:
+        Set required headers: "Authorization" (using the API key), "HTTP-Referer" (set to "http://localhost:8080"), and "Content-Type" ("application/json").
+        Serialize the request DTO as JSON.
+    Process the OpenRouter API response:
+        Assume the response JSON includes a field choices which is a list where each choice has a text field containing the AI-generated content.
+        Extract usage details (e.g., promptTokens, completionTokens, totalTokens) and build a metadata object.
+        Save the AI response as a ChatMessage in the database (with sender "ai" and current timestamp).
+        Return a ContentResponseDTO that contains:
+            generatedContent: the processed content.
+            promptMetadata: metadata including the model used and usage stats.
+            status: a status value (e.g., COMPLETED or FAILED).
+
+Controller Layer:
+
+    Create a REST controller (AskController) that exposes the /ask endpoint.
+    Validate that userId is provided in the request; if missing, return a 400 Bad Request with an error message.
+    Delegate the processing of the request to the service and return the resulting ContentResponseDTO.
+
+Testing and Running:
+
+    Ensure the application starts on a configurable port (e.g., 8080).
+    Provide instructions (or sample curl command) to test the /ask endpoint with a JSON payload including userId, prompt, and an empty history.
