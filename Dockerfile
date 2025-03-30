@@ -1,11 +1,17 @@
-# Use a lightweight JDK base image
-FROM eclipse-temurin:21-jdk-alpine
+FROM eclipse-temurin:21-jdk-alpine AS builder
 
-# Set the working directory
 WORKDIR /app
 
-# Copy the JAR into the container
-COPY build/libs/thinky.jar app.jar
+# Copy Gradle files and build everything
+COPY . .
+RUN ./gradlew build
 
-# Run the JAR
+# ---
+
+FROM eclipse-temurin:21-jdk-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/build/libs/thinky.jar app.jar
+
 ENTRYPOINT ["java", "-jar", "app.jar"]
