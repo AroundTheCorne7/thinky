@@ -20,6 +20,11 @@ configurations {
 	}
 }
 
+bootJar {
+	archiveFileName = 'thinky.jar'
+}
+
+
 repositories {
 	mavenCentral()
 }
