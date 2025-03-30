@@ -15,6 +15,7 @@ import java.util.List;
 public class ChatRequest {
     
     private String userId;
+    private String conversationId;
     private String prompt;
     private String model;
 }

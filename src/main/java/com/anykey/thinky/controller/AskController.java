@@ -1,3 +1,5 @@
+package com.anykey.thinky.controller;
+
 import com.anykey.thinky.dto.ChatRequest;
 import com.anykey.thinky.dto.ContentResponseDTO;
 import com.anykey.thinky.service.OpenRouterService;

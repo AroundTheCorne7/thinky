@@ -4,8 +4,8 @@ import com.anykey.thinky.dto.ChatRequest;
 import com.anykey.thinky.dto.ContentResponseDTO;
 import com.anykey.thinky.dto.OpenRouterRequest;
 import com.anykey.thinky.dto.OpenRouterResponse;
-import com.anykey.thinky.model.ChatMessage;
-import com.anykey.thinky.repository.ChatMessageRepository;
+import com.anykey.thinky.model.Conversation;
+import com.anykey.thinky.repository.ConversationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,14 +16,13 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OpenRouterService {
 
-    private final ChatMessageRepository chatMessageRepository;
+    private final ConversationRepository conversationRepository;
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -41,7 +40,7 @@ public class OpenRouterService {
             }
 
             List<Map<String, String>> messages = new ArrayList<>();
-            
+
             // Add system message to guide rather than give direct answers
             Map<String, String> systemMessage = new HashMap<>();
             systemMessage.put("role", "system");
@@ -50,37 +49,31 @@ public class OpenRouterService {
                     "For math or technical problems, show steps and reasoning approaches but let them reach the final conclusion. " +
                     "Your goal is to teach and facilitate learning, not to solve problems for users.");
             messages.add(systemMessage);
-            
+
             // Use the history from the request if provided
-            if (chatRequest.getHistory() != null && !chatRequest.getHistory().isEmpty()) {
-                // Process history from the request
-                for (int i = 0; i < chatRequest.getHistory().size(); i++) {
-                    Map<String, String> messageMap = new HashMap<>();
-                    // Alternate between user and assistant roles
-                    messageMap.put("role", i % 2 == 0 ? "user" : "assistant");
-                    messageMap.put("content", chatRequest.getHistory().get(i));
-                    messages.add(messageMap);
-                }
-            } else {
-                // If no history in request, retrieve from database
-                List<ChatMessage> chatHistory = chatMessageRepository.findByUserIdOrderByTimestamp(chatRequest.getUserId());
-                for (ChatMessage message : chatHistory) {
+            // NEW (always load from DB)
+            Optional<Conversation> conversationOptional = conversationRepository.findByIdAndUserId(chatRequest.getUserId(), chatRequest.getConversationId());
+            Conversation conversation = conversationOptional.orElse(null);
+            if (conversation != null) {
+                for (Conversation.Message message : conversation.getMessages()) {
                     Map<String, String> messageMap = new HashMap<>();
                     messageMap.put("role", message.getSender().equals("user") ? "user" : "assistant");
                     messageMap.put("content", message.getMessage());
                     messages.add(messageMap);
                 }
+            } else {
+                conversation = Conversation.builder().userId(chatRequest.getUserId()).messages(new ArrayList<>()).build();
             }
-            
+
+
             // Save the new user message to the database
-            ChatMessage userMessage = ChatMessage.builder()
-                    .userId(chatRequest.getUserId())
+            Conversation.Message userMessage = Conversation.Message.builder()
                     .sender("user")
                     .message(chatRequest.getPrompt())
                     .timestamp(LocalDateTime.now())
                     .build();
-            chatMessageRepository.save(userMessage);
-            
+            conversation.getMessages().add(userMessage);
+
             // Add current user message
             Map<String, String> currentMessage = new HashMap<>();
             currentMessage.put("role", "user");
@@ -95,31 +88,31 @@ public class OpenRouterService {
 
             // Call OpenRouter API
             OpenRouterResponse response = callOpenRouterApi(openRouterRequest);
-            
+
             // Extract AI response
             String aiResponse = "";
             if (response != null && response.getChoices() != null && !response.getChoices().isEmpty()) {
-                OpenRouterResponse.Choice choice = response.getChoices().get(0);
+                OpenRouterResponse.Choice choice = response.getChoices().getFirst();
                 if (choice.getMessage() != null) {
                     aiResponse = choice.getMessage().get("content");
                 } else if (choice.getText() != null) {
                     aiResponse = choice.getText();
                 }
             }
-            
+
             // Save AI response to database
-            ChatMessage aiMessage = ChatMessage.builder()
-                    .userId(chatRequest.getUserId())
+            Conversation.Message aiMessage = Conversation.Message.builder()
                     .sender("ai")
                     .message(aiResponse)
                     .timestamp(LocalDateTime.now())
                     .build();
-            chatMessageRepository.save(aiMessage);
+            conversation.getMessages().add(aiMessage);
 
+            conversationRepository.save(conversation);
             // Create metadata
             Map<String, Object> metadata = new HashMap<>();
             metadata.put("model", chatRequest.getModel());
-            
+
             if (response != null && response.getUsage() != null) {
                 metadata.put("promptTokens", response.getUsage().getPromptTokens());
                 metadata.put("completionTokens", response.getUsage().getCompletionTokens());
@@ -132,7 +125,7 @@ public class OpenRouterService {
                     .promptMetadata(metadata)
                     .status(ContentResponseDTO.ResponseStatus.COMPLETED)
                     .build();
-            
+
         } catch (Exception e) {
             log.error("Error processing request", e);
             return ContentResponseDTO.builder()
@@ -144,12 +137,12 @@ public class OpenRouterService {
 
     private OpenRouterResponse callOpenRouterApi(OpenRouterRequest request) throws IOException {
         String requestJson = objectMapper.writeValueAsString(request);
-        
+
         RequestBody body = RequestBody.create(
                 requestJson,
                 MediaType.parse("application/json")
         );
-        
+
         Request httpRequest = new Request.Builder()
                 .url(apiUrl)
                 .post(body)
@@ -157,18 +150,18 @@ public class OpenRouterService {
                 .addHeader("HTTP-Referer", "http://localhost:8080")
                 .addHeader("Content-Type", "application/json")
                 .build();
-        
+
         try (Response response = httpClient.newCall(httpRequest).execute()) {
             if (!response.isSuccessful()) {
                 log.error("API call failed with code: {}", response.code());
                 throw new IOException("API call failed: " + response.code());
             }
-            
+
             ResponseBody responseBody = response.body();
             if (responseBody == null) {
                 throw new IOException("Empty response from API");
             }
-            
+
             return objectMapper.readValue(responseBody.string(), OpenRouterResponse.class);
         }
     }
